@@ -1,20 +1,18 @@
 package Quote::Code;
 
 use v5.14.0;
-
 use warnings;
-use strict;
 
 use Carp qw(croak);
 
 use XSLoader;
 BEGIN {
-	our $VERSION = '0.03';
+	our $VERSION = '1.00';
 	XSLoader::load;
 }
 
 my %export = (
-	qc => HINTK_QC,
+	qc    => HINTK_QC,
 	qc_to => HINTK_QC_TO,
 );
 
@@ -72,7 +70,8 @@ This module provides the new keywords C<qc> and C<qc_to>.
 
 C<qc> is a quoting operator like L<q or qq|perlop/Quote-and-Quote-like-Operators>.
 It works like C<q> in that it doesn't interpolate C<$foo> or C<@foo>, but like
-C<qq> in that it recognizes backslash escapes such as C<\n>, C<\xff>, etc.
+C<qq> in that it recognizes backslash escapes such as C<\n>, C<\xff>,
+C<\N{EURO SIGN}>, etc.
 
 What it adds is the ability to embed arbitrary expressions in braces
 (C<{...}>). This is both more readable and more efficient than the old C<"foo
@@ -122,17 +121,13 @@ escape C<#{> by writing either C<\#{> or C<#\{>.
 
 Variables aren't interpolated in either case.
 
-=head1 BUGS
-
-It doesn't understand C<\N{...}>.
-
 =head1 AUTHOR
 
 Lukas Mai, C<< <l.mai at web.de> >>
 
 =head1 COPYRIGHT & LICENSE
 
-Copyright 2012 Lukas Mai.
+Copyright 2012-2013 Lukas Mai.
 
 This program is free software; you can redistribute it and/or modify it
 under the terms of either: the GNU General Public License as published

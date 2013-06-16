@@ -4,7 +4,7 @@
       "Lukas Mai <l.mai@web.de>"
    ],
    "dynamic_config" : 1,
-   "generated_by" : "ExtUtils::MakeMaker version 6.6302, CPAN::Meta::Converter version 2.120921",
+   "generated_by" : "ExtUtils::MakeMaker version 6.68, CPAN::Meta::Converter version 2.131560",
    "license" : [
       "perl_5"
    ],
@@ -21,25 +21,33 @@
    },
    "prereqs" : {
       "build" : {
-         "requires" : {
-            "Test::More" : "0"
-         }
-      },
-      "configure" : {
-         "requires" : {
-            "ExtUtils::MakeMaker" : "6.56"
-         }
+         "requires" : {}
       },
       "runtime" : {
          "requires" : {
             "Carp" : "0",
             "XSLoader" : "0",
             "perl" : "5.014000",
-            "strict" : "0",
             "warnings" : "0"
+         }
+      },
+      "test" : {
+         "requires" : {
+            "Test::More" : "0",
+            "charnames" : "0",
+            "if" : "0",
+            "strict" : "0",
+            "utf8" : "0"
          }
       }
    },
    "release_status" : "stable",
-   "version" : "0.03"
+   "resources" : {
+      "repository" : {
+         "type" : "git",
+         "url" : "git://github.com/mauke/Quote-Code.git",
+         "web" : "https://github.com/mauke/Quote-Code"
+      }
+   },
+   "version" : "1.00"
 }

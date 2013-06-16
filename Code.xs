@@ -70,7 +70,6 @@ WARNINGS_ENABLE
 #define HINTK_QC     MY_PKG "/qc"
 #define HINTK_QC_TO  MY_PKG "/qc_to"
 
-
 static int (*next_keyword_plugin)(pTHX_ char *, STRLEN, OP **);
 
 static void free_ptr_op(pTHX_ void *vp) {
@@ -92,7 +91,7 @@ static void missing_terminator(pTHX_ const QCSpec *spec, line_t line) {
 	if (!sv) {
 		sv = sv_2mortal(newSVpvs("'\"'"));
 		if (c != '"') {
-			char utf8_tmp[UTF8_MAXBYTES + 1], *d;
+			U8 utf8_tmp[UTF8_MAXBYTES + 1], *d;
 			d = uvchr_to_utf8(utf8_tmp, c);
 			pv_uni_display(sv, utf8_tmp, d - utf8_tmp, 100, UNI_DISPLAY_QQ);
 		}
@@ -110,12 +109,12 @@ static void missing_terminator(pTHX_ const QCSpec *spec, line_t line) {
 }
 
 static void my_sv_cat_c(pTHX_ SV *sv, U32 c) {
-	char ds[UTF8_MAXBYTES + 1], *d;
+	U8 ds[UTF8_MAXBYTES + 1], *d;
 	d = uvchr_to_utf8(ds, c);
 	if (d - ds > 1) {
 		sv_utf8_upgrade(sv);
 	}
-	sv_catpvn(sv, ds, d - ds);
+	sv_catpvn(sv, (char *)ds, d - ds);
 }
 
 static U32 hex2int(unsigned char c) {
@@ -168,15 +167,17 @@ static OP *parse_qctail(pTHX_ const QCSpec *spec) {
 			missing_terminator(aTHX_ spec, start);
 		}
 
+		assert(PL_parser->bufend >= PL_parser->bufptr);
+
 		if (
 			b == '\n' &&
 			delim_str &&
 			/* c == spec->delim_start && */
-			PL_parser->bufend - PL_parser->bufptr >= SvCUR(delim_str) &&
+			(STRLEN)(PL_parser->bufend - PL_parser->bufptr) >= SvCUR(delim_str) &&
 			(elim = PL_parser->bufptr + SvCUR(delim_str),
 			 memcmp(PL_parser->bufptr, SvPVX(delim_str), SvCUR(delim_str)) == 0) && (
 				!(
-					PL_parser->bufend - PL_parser->bufptr > SvCUR(delim_str) ||
+					(STRLEN)(PL_parser->bufend - PL_parser->bufptr) > SvCUR(delim_str) ||
 					lex_next_chunk(0)
 				) ||
 				(elim++, PL_parser->bufptr[SvCUR(delim_str)] == '\n') || (
@@ -299,6 +300,117 @@ static OP *parse_qctail(pTHX_ const QCSpec *spec) {
 					}
 					break;
 
+				case 'N': {
+					SV *name;
+					char *n_ptr;
+					STRLEN n_len;
+
+					c = lex_read_unichar(0);
+					if (c != '{') {
+						croak("Missing braces on \\N{}");
+					}
+
+					name = sv_2mortal(newSVpvs(""));
+					if (lex_bufutf8()) {
+						SvUTF8_on(name);
+					}
+
+					while ((c = lex_read_unichar(0)) != '}') {
+						if (c == -1) {
+							croak("Missing right brace on \\N{}");
+						}
+						my_sv_cat_c(aTHX_ name, c);
+					}
+
+					n_ptr = SvPV(name, n_len);
+
+					if (n_len >= 2 && n_ptr[0] == 'U' && n_ptr[1] == '+') {
+						I32 flags = PERL_SCAN_ALLOW_UNDERSCORES | PERL_SCAN_DISALLOW_PREFIX;
+						STRLEN x_len;
+
+						n_ptr += 2;
+						n_len -= 2;
+
+						x_len = n_len;
+						c = grok_hex(n_ptr, &x_len, &flags, NULL);
+						if (x_len == 0 || x_len != n_len) {
+							croak("Invalid hexadecimal number in \\N{U+...}");
+						}
+
+						break;
+					}
+
+					{
+						HV *table;
+						SV **cvp;
+
+						#if HAVE_PERL_VERSION(5, 15, 7)
+							if (
+								!(table = GvHV(PL_hintgv)) ||
+								!(PL_hints & HINT_LOCALIZE_HH) ||
+								!(cvp = hv_fetchs(table, "charnames", FALSE)) ||
+								!SvOK(*cvp)
+							) {
+								load_module(
+									0, newSVpvs("charnames"), NULL,
+									newSVpvs(":full"), newSVpvs(":short"), (SV *)NULL
+								);
+							}
+						#endif
+
+						if (
+							!(table = GvHV(PL_hintgv)) ||
+							!(PL_hints & HINT_LOCALIZE_HH)
+						) {
+							/* ??? */
+							croak("Constant(\\N{%"SVf"} unknown", SVfARG(name));
+						}
+
+						if (
+							!(cvp = hv_fetchs(table, "charnames", FALSE)) ||
+							!SvOK(*cvp)
+						) {
+							croak("Unknown charname '%"SVf"'", SVfARG(name));
+						}
+
+						{
+							SV *r, *cv = *cvp;
+							dSP;
+
+							PUSHSTACKi(PERLSI_OVERLOAD);
+							ENTER;
+							SAVETMPS;
+
+							PUSHMARK(SP);
+							EXTEND(SP, 1);
+							PUSHs(name);
+							PUTBACK;
+
+							call_sv(cv, G_SCALAR);
+							SPAGAIN;
+
+							r = POPs;
+							SvREFCNT_inc_simple_void_NN(r);
+
+							PUTBACK;
+							FREETMPS;
+							LEAVE;
+							POPSTACK;
+
+							if (!SvOK(r)) {
+								SvREFCNT_dec(r);
+								croak("Unknown charname '%"SVf"'", SVfARG(name));
+							}
+
+							sv_catsv(sv, r);
+							SvREFCNT_dec(r);
+							continue;
+						}
+					}
+
+					break;
+				}
+
 				default:
 					if (c >= '0' && c <= '7') {
 						u = c - '0';
@@ -343,10 +455,7 @@ static OP *parse_qctail(pTHX_ const QCSpec *spec) {
 }
 
 static void parse_qc(pTHX_ OP **op_ptr) {
-	I32 c, delim_start, delim_stop;
-	int nesting;
-	OP **gen_sentinel;
-	SV *sv;
+	I32 c;
 
 	c = lex_peek_unichar(0);
 
@@ -381,7 +490,6 @@ static void parse_qc(pTHX_ OP **op_ptr) {
 static void parse_qc_to(pTHX_ OP **op_ptr) {
 	I32 c, qdelim;
 	SV *delim, *leftover;
-	int backslash_escape;
 	line_t start;
 
 	lex_read_space(0);
@@ -393,16 +501,8 @@ static void parse_qc_to(pTHX_ OP **op_ptr) {
 	lex_read_space(0);
 	start = CopLINE(PL_curcop);
 	c = lex_peek_unichar(0);
-	switch (c) {
-		case '\'':
-			backslash_escape = 0;
-			break;
-		case '"':
-			backslash_escape = 1;
-			break;
-
-		default:
-			croak("Missing \"'\" or '\"' after qc_to <<");
+	if (!(c == '\'' || c == '"')) {
+		croak("Missing \"'\" or '\"' after qc_to <<");
 	}
 	qdelim = c;
 	lex_read_unichar(0);
@@ -459,24 +559,24 @@ static int qc_enabled(pTHX_ const char *hk_ptr, size_t hk_len) {
 	sv = *psv;
 	return SvTRUE(sv);
 }
-#define qc_enableds(S) qc_enabled(aTHX_ "" S "", sizeof (S) - 1)
+#define qc_enableds(S) qc_enabled(aTHX_ STR_WITH_LEN(S))
 
 static int my_keyword_plugin(pTHX_ char *keyword_ptr, STRLEN keyword_len, OP **op_ptr) {
 	int ret;
 
-	SAVETMPS;
-
 	if (keyword_len == 2 && keyword_ptr[0] == 'q' && keyword_ptr[1] == 'c' && qc_enableds(HINTK_QC)) {
+		ENTER;
 		parse_qc(aTHX_ op_ptr);
+		LEAVE;
 		ret = KEYWORD_PLUGIN_EXPR;
 	} else if (keyword_len == 5 && memcmp(keyword_ptr, "qc_to", 5) == 0 && qc_enableds(HINTK_QC_TO)) {
+		ENTER;
 		parse_qc_to(aTHX_ op_ptr);
+		LEAVE;
 		ret = KEYWORD_PLUGIN_EXPR;
 	} else {
 		ret = next_keyword_plugin(aTHX_ keyword_ptr, keyword_len, op_ptr);
 	}
-
-	FREETMPS;
 
 	return ret;
 }
